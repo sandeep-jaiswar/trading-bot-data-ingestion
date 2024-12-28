@@ -116,3 +116,50 @@ def insert_stock_data(data, ticker):
     finally:
         cursor.close()
         conn.close()
+        
+        
+def insert_technical_indicators(indicators_data, ticker):
+    """
+    Insert technical indicators into the technical_indicators table.
+    :param indicators_data: List of dictionaries containing technical indicator data.
+    :param ticker: Stock ticker symbol.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Fetch the ticker_id
+    try:
+        ticker_id = get_ticker_id(ticker)
+    except ValueError as e:
+        raise Exception(f"Ticker '{ticker}' not found in the database. {e}")
+
+    insert_query = """
+    INSERT INTO technical_indicators (
+        ticker_id, date, indicator_name, value
+    )
+    VALUES (%s, %s, %s, %s)
+    ON CONFLICT (ticker_id, date, indicator_name) DO UPDATE SET
+        value = EXCLUDED.value;
+    """
+
+    # Prepare data for batch insert
+    records = [
+        (
+            ticker_id,
+            indicator["date"],
+            indicator["indicator_name"],
+            indicator["value"],
+        )
+        for indicator in indicators_data
+    ]
+
+    try:
+        execute_batch(cursor, insert_query, records)
+        conn.commit()
+        print(f"Inserted {len(records)} technical indicators for {ticker}.")
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Failed to insert technical indicators for {ticker}: {e}")
+    finally:
+        cursor.close()
+        conn.close()
