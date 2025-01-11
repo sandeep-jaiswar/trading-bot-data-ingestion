@@ -54,7 +54,7 @@ def create_tables():
 
         cursor.execute(ddl_queries)
         conn.commit()
-        print("Tables created successfully.")
+        logging.info("Tables created successfully.")
     
     except Exception as e:
         conn.rollback()
@@ -96,6 +96,38 @@ def fetch_ticker_id(ticker, conn):
         except Exception as e:
             raise Exception(f"Failed to fetch ticker ID: {e}")
         
+        
+def fetch_all_tickers():
+    """
+    Fetch all tickers from the 'tickers' table.
+    """
+    query = sql.SQL("SELECT * FROM {}").format(
+        sql.Identifier('tickers')
+    )
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        try:
+            cursor.execute(query)
+            tickers = cursor.fetchall()
+            return tickers if tickers else None
+        except Exception as e:
+            raise Exception(f"Failed to fetch tickers: {e}")
+        
+        
+def fetch_ticker_data(ticker, conn):
+    """
+    Fetch the ID of a company by its ticker symbol.
+    """
+    query = sql.SQL("SELECT * FROM {} WHERE ticker = %s").format(
+        sql.Identifier('tickers')
+    )
+    with conn.cursor() as cursor:
+        try:
+            cursor.execute(query, (ticker,))
+            ticker_data = cursor.fetchone()
+            return ticker_data if ticker_data else None
+        except Exception as e:
+            raise Exception(f"Failed to fetch ticker data: {e}")
         
 def fetch_sector_id(sector_name, conn):
     """
@@ -139,7 +171,7 @@ def insert_industry_data():
             execute_batch(cursor, insert_query, industry_values)
         
         conn.commit()
-        print(f"{len(industry_values)} industries inserted successfully.")
+        logging.info(f"{len(industry_values)} industries inserted successfully.")
     
     except Exception as e:
         conn.rollback()
@@ -175,7 +207,7 @@ def insert_sector_data():
             execute_batch(cursor, insert_query, sector_values)
         
         conn.commit()
-        print(f"{len(sector_values)} sectors inserted successfully.")
+        logging.info(f"{len(sector_values)} sectors inserted successfully.")
     
     except Exception as e:
         conn.rollback()
@@ -213,7 +245,7 @@ def insert_tickers_data():
             industry_id = fetch_industry_id(row['Industry New Name'], conn)
             sector_id = fetch_sector_id(row['Sector Name'], conn)
             if industry_id is None:
-                print(f"Industry '{row['Industry New Name']}' not found. Skipping row.")
+                logging.info(f"Industry '{row['Industry New Name']}' not found. Skipping row.")
                 continue
             security_values.append((row['Security Id'], row['Security Name'], sector_id, industry_id))
 
@@ -221,9 +253,9 @@ def insert_tickers_data():
             with conn.cursor() as cursor:
                 execute_batch(cursor, insert_query, security_values)
             conn.commit()
-            print(f"{len(security_values)} securities inserted successfully.")
+            logging.info(f"{len(security_values)} securities inserted successfully.")
         else:
-            print("No securities data to insert.")
+            logging.info("No securities data to insert.")
 
     except Exception as e:
         conn.rollback()
@@ -231,3 +263,164 @@ def insert_tickers_data():
     
     finally:
         conn.close()
+
+def insert_dividend_metrics(json_data):
+    """
+    Insert dividend metrics data into the 'dividend_metrics' table based on JSON input.
+    :param json_data: dict containing dividend-related data.
+    """
+    conn = get_db_connection()
+    insert_query = sql.SQL(
+        "INSERT INTO {} (ticker_id, dividend_yield, payout_ratio, dividend_growth) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING"
+    ).format(sql.Identifier('dividend_metrics'))
+
+    try:
+        # Extract the required dividend metrics from JSON data
+        ticker_id = fetch_ticker_id(json_data.get("symbol"), conn)
+        if ticker_id is None:
+            raise ValueError(f"Ticker '{json_data.get('symbol')}' not found.")
+
+        dividend_yield = json_data.get("dividendYield")
+        payout_ratio = json_data.get("payoutRatio")
+        dividend_growth = json_data.get("fiveYearAvgDividendYield")  # Assuming 5-year average dividend yield as growth
+
+        # Validate extracted values
+        if dividend_yield is None or payout_ratio is None or dividend_growth is None:
+            raise ValueError("Missing one or more required dividend metrics in the JSON data.")
+
+        # Prepare data for insertion
+        dividend_values = [(ticker_id, dividend_yield, payout_ratio, dividend_growth)]
+
+        # Insert into the database
+        with conn.cursor() as cursor:
+            execute_batch(cursor, insert_query, dividend_values)
+        conn.commit()
+        logging.info(f"Dividend metrics for '{json_data.get('symbol')}' inserted successfully.")
+
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Failed to insert dividend metrics data: {e}")
+
+    finally:
+        conn.close()
+        
+        
+def insert_company_data(json_data):
+    """
+    Insert company data into the 'company' table based on JSON input.
+    :param json_data: dict containing company-related data.
+    """
+    conn = get_db_connection()
+    insert_query = sql.SQL(
+        """
+        INSERT INTO {} (
+            ticker_id,
+            short_name,
+            long_name,
+            industry,
+            industry_key,
+            industry_disp,
+            sector,
+            sector_key,
+            sector_disp,
+            address1,
+            address2,
+            city,
+            zip,
+            country,
+            phone,
+            fax,
+            website,
+            long_business_summary,
+            full_time_employees,
+            currency,
+            exchange,
+            quote_type,
+            symbol,
+            underlying_symbol
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s
+        )
+        ON CONFLICT (ticker_id)
+        DO UPDATE SET
+            short_name = EXCLUDED.short_name,
+            long_name = EXCLUDED.long_name,
+            industry = EXCLUDED.industry,
+            industry_key = EXCLUDED.industry_key,
+            industry_disp = EXCLUDED.industry_disp,
+            sector = EXCLUDED.sector,
+            sector_key = EXCLUDED.sector_key,
+            sector_disp = EXCLUDED.sector_disp,
+            address1 = EXCLUDED.address1,
+            address2 = EXCLUDED.address2,
+            city = EXCLUDED.city,
+            zip = EXCLUDED.zip,
+            country = EXCLUDED.country,
+            phone = EXCLUDED.phone,
+            fax = EXCLUDED.fax,
+            website = EXCLUDED.website,
+            long_business_summary = EXCLUDED.long_business_summary,
+            full_time_employees = EXCLUDED.full_time_employees,
+            currency = EXCLUDED.currency,
+            exchange = EXCLUDED.exchange,
+            quote_type = EXCLUDED.quote_type,
+            symbol = EXCLUDED.symbol,
+            underlying_symbol = EXCLUDED.underlying_symbol
+        """
+    ).format(sql.Identifier('company'))
+
+
+    try:
+        # Extract and prepare data from JSON
+        ticker_id = fetch_ticker_id(json_data.get('symbol'), conn)
+        if ticker_id is None:
+            raise ValueError(f"Ticker '{json_data.get('symbol')}' not found.")
+        
+        logging.info(ticker_id)
+
+
+        # Extract values, using defaults where necessary
+        company_values = (
+            ticker_id,
+            json_data.get("shortName",""),
+            json_data.get("longName",""),
+            json_data.get("industry",""),
+            json_data.get("industryKey",""),
+            json_data.get("industryDisp",""),
+            json_data.get("sector",""),
+            json_data.get("sectorKey",""),
+            json_data.get("sectorDisp",""),
+            json_data.get("address1",""),
+            json_data.get("address2",""),
+            json_data.get("city",""),
+            json_data.get("zip",""),
+            json_data.get("country",""),
+            json_data.get("phone",""),
+            json_data.get("fax",""),
+            json_data.get("website",""),
+            json_data.get("longBusinessSummary",""),
+            json_data.get("fullTimeEmployees",0),
+            json_data.get("currency",""),
+            json_data.get("exchange",""),
+            json_data.get("quoteType",""),
+            json_data.get("symbol",""),
+            json_data.get("underlyingSymbol",""),
+        )
+        
+        # Insert data into the database
+        with conn.cursor() as cursor:
+            cursor.execute(insert_query, company_values)
+        conn.commit()
+        logging.info(f"Company data for '{json_data.get('symbol')}' inserted/updated successfully.")
+
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Failed to insert/update company data: {e}")
+
+    finally:
+        conn.close()
+
