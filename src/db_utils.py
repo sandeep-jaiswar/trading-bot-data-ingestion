@@ -6,9 +6,16 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 import pandas as pd
 import logging 
+import math
 
 # Load environment variables
 load_dotenv()
+
+def sanitize(value):
+    """
+    Replace None or NaN with None to ensure database compatibility.
+    """
+    return None if value is None or (isinstance(value, float) and math.isnan(value)) else value
 
 def get_db_connection():
     """
@@ -128,7 +135,8 @@ def fetch_ticker_data(ticker, conn):
             return ticker_data if ticker_data else None
         except Exception as e:
             raise Exception(f"Failed to fetch ticker data: {e}")
-        
+
+
 def fetch_sector_id(sector_name, conn):
     """
     Fetch the ID of a sector by its name.
@@ -219,7 +227,7 @@ def insert_sector_data():
 
 def insert_tickers_data():
     """
-    Insert securities data (ticker, security_name, industry_id) from the CSV file into the 'securities' table.
+    Insert tickers data (ticker, security_name, industry_id) from the CSV file into the 'tickers' table.
     """
     conn = get_db_connection()
     file_path = "public/Equity.csv"
@@ -263,47 +271,271 @@ def insert_tickers_data():
     
     finally:
         conn.close()
+        
+        
+def insert_dividend_data(dividend_data, symbol):
+    """
+    Insert dividend data into the 'dividends' table based on a dictionary input.
+    :param dividend_data: dict containing dividend-related data with dates as keys and amounts as values.
+    :param symbol: The stock ticker symbol.
+    """
+    # Validate input
+    if not isinstance(dividend_data, dict):
+        raise ValueError("dividend_data must be a dictionary.")
 
-def insert_dividend_metrics(json_data):
+    # Connect to the database
+    try:
+        with get_db_connection() as conn:
+            # Prepare the SQL query
+            insert_query = sql.SQL(
+                """
+                INSERT INTO {} (
+                    ticker_id,
+                    action_date,
+                    price
+                )
+                VALUES (
+                    %s, %s, %s
+                )
+                ON CONFLICT DO NOTHING
+                """
+            ).format(sql.Identifier('dividends'))
+
+            # Fetch the ticker ID
+            ticker_id = fetch_ticker_id(symbol, conn)
+            if ticker_id is None:
+                raise ValueError(f"Ticker '{symbol}' not found.")
+
+            # Prepare data for insertion
+            dividend_values = [(ticker_id, date, amount) for date, amount in dividend_data.items()]
+
+            # Insert into the database
+            with conn.cursor() as cursor:
+                execute_batch(cursor, insert_query, dividend_values)
+            conn.commit()
+
+            logging.info(f"Dividend data for {symbol} inserted successfully.")
+
+    except Exception as e:
+        logging.error(f"Failed to insert dividend data: {e}")
+        raise
+
+
+def insert_balance_sheet(balance_sheet, symbol):
     """
-    Insert dividend metrics data into the 'dividend_metrics' table based on JSON input.
-    :param json_data: dict containing dividend-related data.
+    Inserts balance_sheet data into the 'balance_sheets' table based on dictionary input.
+    :param balance_sheet: dict containing balance sheet data with dates as keys and column-value dictionaries as values.
+    :param symbol: The stock ticker symbol.
     """
-    conn = get_db_connection()
-    insert_query = sql.SQL(
-        "INSERT INTO {} (ticker_id, dividend_yield, payout_ratio, dividend_growth) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING"
-    ).format(sql.Identifier('dividend_metrics'))
+    if not isinstance(balance_sheet, dict):
+        raise ValueError("balance_sheet must be a dictionary.")
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValueError("symbol must be a non-empty string.")
+    
+    c = [
+                    "treasury_shares_number",
+                    "ordinary_shares_number",
+                    "share_issued",
+                    "total_debt",
+                    "tangible_book_value",
+                    "invested_capital",
+                    "working_capital",
+                    "net_tangible_assets",
+                    "capital_lease_obligations",
+                    "common_stock_equity",
+                    "total_capitalization",
+                    "total_equity_gross_minority_interest",
+                    "stockholders_equity",
+                    "other_equity_interest",
+                    "retained_earnings",
+                    "additional_paid_in_capital",
+                    "capital_stock",
+                    "common_stock",
+                    "total_liabilities_net_minority_interest",
+                    "total_non_current_liabilities_net_minority_interest",
+                    "derivative_product_liabilities",
+                    "long_term_debt_and_capital_lease_obligation",
+                    "long_term_capital_lease_obligation",
+                    "long_term_debt",
+                    "long_term_provisions",
+                    "current_liabilities",
+                    "other_current_liabilities",
+                    "current_deferred_taxes_liabilities",
+                    "current_debt_and_capital_lease_obligation",
+                    "current_capital_lease_obligation",
+                    "pension_and_other_post_retirement_benefit_plans_current",
+                    "current_provisions",
+                    "payables",
+                    "other_payable",
+                    "dividends_payable",
+                    "total_tax_payable",
+                    "accounts_payable",
+                    "total_assets",
+                    "total_non_current_assets",
+                    "other_non_current_assets",
+                    "non_current_prepaid_assets",
+                    "non_current_deferred_taxes_assets",
+                    "financial_assets",
+                    "other_investments",
+                    "investment_in_financial_assets",
+                    "available_for_sale_securities",
+                    "goodwill_and_other_intangible_assets",
+                    "other_intangible_assets",
+                    "goodwill",
+                    "net_ppe",
+                    "accumulated_depreciation",
+                    "gross_ppe",
+                    "construction_in_progress",
+                    "other_properties",
+                    "machinery_furniture_equipment",
+                    "buildings_and_improvements",
+                    "land_and_improvements",
+                    "properties",
+                    "current_assets",
+                    "other_current_assets",
+                    "hedging_assets_current",
+                    "assets_held_for_sale_current",
+                    "restricted_cash",
+                    "prepaid_assets",
+                    "inventory",
+                    "finished_goods",
+                    "work_in_process",
+                    "raw_materials",
+                    "other_receivables",
+                    "taxes_receivable",
+                    "accounts_receivable",
+                    "allowance_for_doubtful_accounts_receivable",
+                    "gross_accounts_receivable",
+                    "cash_cash_equivalents_and_short_term_investments",
+                    "other_short_term_investments",
+                    "cash_and_cash_equivalents",
+                    "cash_equivalents",
+                    "cash_financial"
+    ]
+
+    columns = [
+        "TreasurySharesNumber", "OrdinarySharesNumber", "ShareIssued", "TotalDebt", 
+        "TangibleBookValue", "InvestedCapital", "WorkingCapital", "NetTangibleAssets",
+        "CapitalLeaseObligations", "CommonStockEquity", "TotalCapitalization", 
+        "TotalEquityGrossMinorityInterest", "StockholdersEquity", "OtherEquityInterest", 
+        "RetainedEarnings", "AdditionalPaidInCapital", "CapitalStock", "CommonStock",
+        "TotalLiabilitiesNetMinorityInterest", "TotalNonCurrentLiabilitiesNetMinorityInterest",
+        "DerivativeProductLiabilities", "LongTermDebtAndCapitalLeaseObligation", 
+        "LongTermCapitalLeaseObligation", "LongTermDebt", "LongTermProvisions", 
+        "CurrentLiabilities", "OtherCurrentLiabilities", "CurrentDeferredTaxesLiabilities",
+        "CurrentDebtAndCapitalLeaseObligation", "CurrentCapitalLeaseObligation", 
+        "PensionAndOtherPostRetirementBenefitPlansCurrent", "CurrentProvisions", 
+        "Payables", "OtherPayable", "DividendsPayable", "TotalTaxPayable", "AccountsPayable",
+        "TotalAssets", "TotalNonCurrentAssets", "OtherNonCurrentAssets", 
+        "NonCurrentPrepaidAssets", "NonCurrentDeferredTaxesAssets", "FinancialAssets",
+        "OtherInvestments", "InvestmentInFinancialAssets", "AvailableForSaleSecurities",
+        "GoodwillAndOtherIntangibleAssets", "OtherIntangibleAssets", "Goodwill", "NetPpe",
+        "AccumulatedDepreciation", "GrossPpe", "ConstructionInProgress", "OtherProperties", 
+        "MachineryFurnitureEquipment", "BuildingsAndImprovements", "LandAndImprovements",
+        "Properties", "CurrentAssets", "OtherCurrentAssets", "HedgingAssetsCurrent", 
+        "AssetsHeldForSaleCurrent", "RestrictedCash", "PrepaidAssets", "Inventory",
+        "FinishedGoods", "WorkInProcess", "RawMaterials", "OtherReceivables", "TaxesReceivable",
+        "AccountsReceivable", "AllowanceForDoubtfulAccountsReceivable", "GrossAccountsReceivable",
+        "CashCashEquivalentsAndShortTermInvestments", "OtherShortTermInvestments", 
+        "CashAndCashEquivalents", "CashEquivalents", "CashFinancial"
+    ]
 
     try:
-        # Extract the required dividend metrics from JSON data
-        ticker_id = fetch_ticker_id(json_data.get("symbol"), conn)
-        if ticker_id is None:
-            raise ValueError(f"Ticker '{json_data.get('symbol')}' not found.")
+        with get_db_connection() as conn:
+            ticker_id = fetch_ticker_id(symbol, conn)
+            if ticker_id is None:
+                raise ValueError(f"Ticker '{symbol}' not found.")
 
-        dividend_yield = json_data.get("dividendYield")
-        payout_ratio = json_data.get("payoutRatio")
-        dividend_growth = json_data.get("fiveYearAvgDividendYield")  # Assuming 5-year average dividend yield as growth
+            logging.info(f"Inserting balance sheet data for ticker ID: {ticker_id}")
+            
+            insert_query = sql.SQL("""
+                INSERT INTO balance_sheets (
+                    ticker_id, report_date, {columns}
+                ) VALUES (%s, %s, {placeholders})
+                ON CONFLICT DO NOTHING
+            """).format(
+                columns=sql.SQL(', ').join(map(sql.Identifier, c)),
+                placeholders=sql.SQL(', ').join(sql.Placeholder() for _ in columns)
+            )
 
-        # Validate extracted values
-        if dividend_yield is None or payout_ratio is None or dividend_growth is None:
-            raise ValueError("Missing one or more required dividend metrics in the JSON data.")
+            values = [
+                (ticker_id, report_date) + tuple(
+                    sanitize(row_data.get(column)) for column in columns
+                )
+                for report_date, row_data in balance_sheet.items()
+            ]
 
-        # Prepare data for insertion
-        dividend_values = [(ticker_id, dividend_yield, payout_ratio, dividend_growth)]
+            if not values:
+                logging.warning("No balance sheet data to insert.")
+                return
 
-        # Insert into the database
+            with conn.cursor() as cursor:
+                execute_batch(cursor, insert_query, values)
+            conn.commit()
+
+            logging.info(f"Successfully inserted balance sheet data for symbol: {symbol}")
+    except Exception as e:
+        logging.error(f"Failed to insert balance sheet data for symbol '{symbol}': {e}")
+        raise
+
+
+def update_tickers_data(ticker_data, symbol):
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValueError("symbol must be a non-empty string.")
+    conn = get_db_connection()
+    insert_query = sql.SQL(
+        """
+        UPDATE {}
+        SET day_high = %s,
+        day_low = %s,
+        fifty_day_average = %s,
+        last_price = %s,
+        last_volume = %s,
+        market_cap = %s,
+        open = %s,
+        previous_close = %s,
+        regular_market_previous_close = %s,
+        year_high = %s,
+        year_low = %s,
+        shares = %s,
+        ten_day_average_volume = %s,
+        three_month_average_volume = %s,
+        two_hundred_day_average = %s,
+        yearChange = %s
+        WHERE ticker = %s
+        """
+    ).format(sql.Identifier('tickers'))
+
+    try:
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("symbol must be a non-empty string.")
+
         with conn.cursor() as cursor:
-            execute_batch(cursor, insert_query, dividend_values)
+            cursor.execute(insert_query, (ticker_data.get("dayHigh"),
+        ticker_data.get("dayLow"),
+        ticker_data.get("fiftyDayAverage"),
+        ticker_data.get("lastPrice"),
+        ticker_data.get("lastVolume"),
+        ticker_data.get("marketCap"),
+        ticker_data.get("open"),
+        ticker_data.get("previousClose"),
+        ticker_data.get("regularMarketPreviousClose"),
+        ticker_data.get("yearHigh"),
+        ticker_data.get("yearLow"),
+        ticker_data.get("shares"),
+        ticker_data.get("tenDayAverageVolume"),
+        ticker_data.get("threeMonthAverageVolume"),
+        ticker_data.get("twoHundredDayAverage"),
+        ticker_data.get("yearChange"),symbol))
         conn.commit()
-        logging.info(f"Dividend metrics for '{json_data.get('symbol')}' inserted successfully.")
+        logging.info(f"Security data for '{symbol}' updated successfully.")
 
     except Exception as e:
         conn.rollback()
-        raise Exception(f"Failed to insert dividend metrics data: {e}")
-
+        raise Exception(f"Failed to update security data: {e}")
+    
     finally:
         conn.close()
-        
         
 def insert_company_data(json_data):
     """
@@ -423,4 +655,5 @@ def insert_company_data(json_data):
 
     finally:
         conn.close()
-
+        
+        
