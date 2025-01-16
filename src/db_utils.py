@@ -540,55 +540,14 @@ def insert_balance_sheet(balance_sheet, symbol):
     
     
 def insert_cashflow(cashflow, symbol):
+
     if not isinstance(cashflow, dict):
         raise ValueError("cashflow must be a dictionary.")
     if not isinstance(symbol, str) or not symbol.strip():
         raise ValueError("symbol must be a non-empty string.")
     
-    c = [
-        'free_cash_flow',
-        'capital_expenditure',
-        'end_cash_position',
-        'beginning_cash_position',
-        'effect_of_exchange_rate_changes',
-        'changes_in_cash',
-        'financing_cash_flow',
-        'interest_paid_cff',
-        'cash_dividends_paid',
-        'common_stock_dividend_paid',
-        'investing_cash_flow',
-        'net_other_investing_changes',
-        'interest_received_cfi',
-        'net_investment_purchase_and_sale',
-        'sale_of_investment',
-        'purchase_of_investment',
-        'net_business_purchase_and_sale',
-        'sale_of_business',
-        'purchase_of_business',
-        'net_ppe_purchase_and_sale',
-        'sale_of_ppe',
-        'purchase_of_ppe',
-        'operating_cash_flow',
-        'taxes_refund_paid',
-        'change_in_working_capital',
-        'change_in_other_current_liabilities',
-        'change_in_other_current_assets',
-        'change_in_payable',
-        'change_in_inventory',
-        'change_in_receivables',
-        'other_non_cash_items',
-        'provisionand_write_offof_assets',
-        'depreciation_and_amortization',
-        'amortization_cash_flow',
-        'depreciation',
-        'gain_loss_on_investment_securities',
-        'net_foreign_currency_exchange_gain_loss',
-        'gain_loss_on_sale_of_ppe',
-        'gain_loss_on_sale_of_business',
-        'net_income_from_continuing_operations'
-    ]
-
-    columns = [
+    # Database column names
+    cashflow_keys = [
         'FreeCashFlow',
         'CapitalExpenditure',
         'EndCashPosition',
@@ -631,18 +590,66 @@ def insert_cashflow(cashflow, symbol):
         'NetIncomeFromContinuingOperations'
     ]
 
-    # Ensure that the number of columns in `c` matches the placeholders.
-    placeholders = sql.SQL(', ').join(sql.Placeholder() for _ in columns)
-    
+    # Keys in the cashflow dictionary
+    db_columns = [
+        'free_cash_flow',
+        'capital_expenditure',
+        'end_cash_position',
+        'beginning_cash_position',
+        'effect_of_exchange_rate_changes',
+        'changes_in_cash',
+        'financing_cash_flow',
+        'interest_paid_cff',
+        'cash_dividends_paid',
+        'common_stock_dividend_paid',
+        'investing_cash_flow',
+        'net_other_investing_changes',
+        'interest_received_cfi',
+        'net_investment_purchase_and_sale',
+        'sale_of_investment',
+        'purchase_of_investment',
+        'net_business_purchase_and_sale',
+        'sale_of_business',
+        'purchase_of_business',
+        'net_ppe_purchase_and_sale',
+        'sale_of_ppe',
+        'purchase_of_ppe',
+        'operating_cash_flow',
+        'taxes_refund_paid',
+        'change_in_working_capital',
+        'change_in_other_current_liabilities',
+        'change_in_other_current_assets',
+        'change_in_payable',
+        'change_in_inventory',
+        'change_in_receivables',
+        'other_non_cash_items',
+        'provisionand_write_offof_assets',
+        'depreciation_and_amortization',
+        'amortization_cash_flow',
+        'depreciation',
+        'gain_loss_on_investment_securities',
+        'net_foreign_currency_exchange_gain_loss',
+        'gain_loss_on_sale_of_ppe',
+        'gain_loss_on_sale_of_business',
+        'net_income_from_continuing_operations'
+    ]
+
+    # SQL placeholders
+    placeholders = sql.SQL(', ').join(sql.Placeholder() for _ in db_columns)
+
     insert_query = sql.SQL("""
         INSERT INTO cashflows (
             ticker_id, report_date, {columns}
         ) VALUES (%s, %s, {placeholders})
         ON CONFLICT DO NOTHING
     """).format(
-        columns=sql.SQL(', ').join(map(sql.Identifier, c)),
+        columns=sql.SQL(', ').join(map(sql.Identifier, db_columns)),
         placeholders=placeholders
     )
+
+    def sanitize(value):
+        """Sanitize value for database insertion."""
+        return value if value is not None else None
 
     try:
         with get_db_connection() as conn:
@@ -654,7 +661,7 @@ def insert_cashflow(cashflow, symbol):
             
             values = [
                 (ticker_id, report_date) + tuple(
-                    sanitize(row_data.get(column)) for column in c
+                    sanitize(row_data.get(key)) for key in cashflow_keys
                 )
                 for report_date, row_data in cashflow.items()
             ]
@@ -664,11 +671,11 @@ def insert_cashflow(cashflow, symbol):
                 return
 
             with conn.cursor() as cursor:
-                # Log the query and values for debugging.
-                logging.info(f"Insert query: {insert_query.as_string(conn)}")
+                # Log the query and values for debugging
+                logging.debug(f"Insert query: {insert_query.as_string(conn)}")
                 logging.info(f"Values: {values}")
 
-                # Execute batch insertion.
+                # Execute batch insertion
                 execute_batch(cursor, insert_query, values)
             conn.commit()
 
@@ -677,8 +684,9 @@ def insert_cashflow(cashflow, symbol):
     except Exception as e:
         logging.error(f"Failed to insert cashflow data for symbol '{symbol}': {e}")
         raise
-    
-    
+
+
+
 def update_tickers_data(ticker_data, symbol):
     if not isinstance(symbol, str) or not symbol.strip():
         raise ValueError("symbol must be a non-empty string.")

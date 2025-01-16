@@ -7,7 +7,8 @@ from db_utils import (
     insert_industry_data, 
     insert_sector_data, 
     insert_tickers_data, 
-    update_tickers_data
+    update_tickers_data,
+    insert_cashflow
 )
 from dotenv import load_dotenv
 import yfinance as yf
@@ -46,6 +47,8 @@ def process_ticker_data(ticker_data):
         # Fetch and update ticker fast info
         fast_info = yf_ticker.get_fast_info()
         update_tickers_data(fast_info, symbol)
+        
+        insert_cashflow(yf_ticker.get_cashflow(as_dict=True), symbol)
 
     except Exception as e:
         logging.error(f"Failed to process ticker {symbol}: {e}")
