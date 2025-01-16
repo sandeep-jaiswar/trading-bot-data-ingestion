@@ -144,8 +144,12 @@ CREATE TABLE IF NOT EXISTS public.financial_metrics (
     last_split_date BIGINT,
     enterprise_to_revenue NUMERIC,
     enterprise_to_ebitda NUMERIC,
-    CONSTRAINT fk_ticker FOREIGN KEY (ticker_id) REFERENCES tickers (id) ON DELETE SET NULL
+    revenue_growth NUMERIC,
+    free_cash_flow NUMERIC,
+    CONSTRAINT fk_ticker FOREIGN KEY (ticker_id) REFERENCES tickers (id) ON DELETE SET NULL,
+    CONSTRAINT unique_ticker_id_v3 UNIQUE (ticker_id)
 );
+
 
 CREATE TABLE IF NOT EXISTS public.analyst_ratings (
     id SERIAL PRIMARY KEY,

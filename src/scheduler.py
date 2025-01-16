@@ -8,7 +8,8 @@ from db_utils import (
     insert_sector_data, 
     insert_tickers_data, 
     update_tickers_data,
-    insert_cashflow
+    insert_cashflow,
+    insert_financial_metrics
 )
 from dotenv import load_dotenv
 import yfinance as yf
@@ -31,24 +32,26 @@ def process_ticker_data(ticker_data):
     try:
         yf_ticker = yf.Ticker(full_symbol)
 
-        # Fetch and insert company data
+        # # Fetch and insert company data
         info = yf_ticker.get_info()
         info["symbol"] = symbol
         insert_company_data(info)
+        insert_financial_metrics(info, symbol)
 
-        # Fetch and insert dividend data
+        # # Fetch and insert dividend data
         dividends = yf_ticker.dividends.to_dict()
         insert_dividend_data(dividends, symbol)
 
-        # # Fetch and insert balance sheet data
+        # # # Fetch and insert balance sheet data
         balance_sheet = yf_ticker.get_balance_sheet(as_dict=True)
         insert_balance_sheet(balance_sheet, symbol)
 
-        # Fetch and update ticker fast info
+        # # Fetch and update ticker fast info
         fast_info = yf_ticker.get_fast_info()
         update_tickers_data(fast_info, symbol)
         
-        insert_cashflow(yf_ticker.get_cashflow(as_dict=True), symbol)
+        cashflow = yf_ticker.get_cashflow(as_dict=True)
+        insert_cashflow(cashflow, symbol)
 
     except Exception as e:
         logging.error(f"Failed to process ticker {symbol}: {e}")

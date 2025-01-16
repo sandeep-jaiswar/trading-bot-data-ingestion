@@ -256,7 +256,6 @@ def fetch_sector_id(sector_name, connection=None):
     return fetch_single_id("sectors", "sector_name", sector_name, connection)
 
 
-
 def insert_industry_data(file_path="public/Equity.csv", connection=None):
     """
     Insert unique industry names from the CSV file into the 'industries' table.
@@ -862,4 +861,108 @@ def insert_company_data(json_data):
     finally:
         conn.close()
         
-        
+
+def insert_financial_metrics(financial_metrics, symbol):
+    """
+    Inserts financial metrics for a given symbol into the financial_metrics table.
+
+    Args:
+        financial_metrics (dict): A dictionary containing the financial metrics data.
+        symbol (str): The stock ticker symbol (e.g., 'AAPL').
+
+    Raises:
+        ValueError: If the input data is invalid.
+    """
+
+    if not isinstance(financial_metrics, dict):
+        raise ValueError("financial_metrics must be a dictionary.")
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValueError("symbol must be a non-empty string.")
+    
+    # Database column names
+    financial_metrics_keys = [
+        'priceHint', 'previousClose', 'open', 'dayLow', 'dayHigh',
+        'regularMarketPreviousClose', 'regularMarketOpen', 'regularMarketDayLow',
+        'regularMarketDayHigh', 'dividendRate', 'dividendYield', 'exDividendDate',
+        'payoutRatio', 'fiveYearAvgDividendYield', 'beta', 'trailingPE', 'forwardPE',
+        'volume', 'regularMarketVolume', 'averageVolume', 'averageVolume10days', 'ask',
+        'marketCap', 'fiftyTwoWeekLow', 'fiftyTwoWeekHigh', 'priceToSalesTrailing12Months',
+        'fiftyDayAverage', 'twoHundredDayAverage', 'trailingAnnualDividendRate',
+        'trailingAnnualDividendYield', 'enterpriseValue', 'profitMargins', 'floatShares',
+        'sharesOutstanding', 'heldPercentInsiders', 'heldPercentInstitutions',
+        'impliedSharesOutstanding', 'bookValue', 'priceToBook', 'lastFiscalYearEnd',
+        'nextFiscalYearEnd', 'mostRecentQuarter', 'earningsQuarterlyGrowth',
+        'netIncomeToCommon', 'trailingEPS', 'forwardEPS', 'lastSplitFactor',
+        'lastSplitDate', 'enterpriseToRevenue', 'enterpriseToEbitda', 'revenueGrowth',
+        'freeCashflow'
+    ]
+
+    # Keys in the financial_metrics dictionary (normalized to lowercase for DB column matching)
+    db_columns = [
+        'price_hint', 'previous_close', 'open_price', 'day_low', 'day_high',
+        'regular_market_previous_close', 'regular_market_open', 'regular_market_day_low',
+        'regular_market_day_high', 'dividend_rate', 'dividend_yield', 'ex_dividend_date',
+        'payout_ratio', 'five_year_avg_dividend_yield', 'beta', 'trailing_pe', 'forward_pe',
+        'volume', 'regular_market_volume', 'average_volume', 'average_volume_10days', 'ask',
+        'market_cap', 'fifty_two_week_low', 'fifty_two_week_high', 'price_to_sales_trailing_12_months',
+        'fifty_day_average', 'two_hundred_day_average', 'trailing_annual_dividend_rate',
+        'trailing_annual_dividend_yield', 'enterprise_value', 'profit_margins', 'float_shares',
+        'shares_outstanding', 'held_percent_insiders', 'held_percent_institutions',
+        'implied_shares_outstanding', 'book_value', 'price_to_book', 'last_fiscal_year_end',
+        'next_fiscal_year_end', 'most_recent_quarter', 'earnings_quarterly_growth',
+        'net_income_to_common', 'trailing_eps', 'forward_eps', 'last_split_factor',
+        'last_split_date', 'enterprise_to_revenue', 'enterprise_to_ebitda', 'revenue_growth',
+        'free_cash_flow'
+    ]
+    
+    # SQL placeholders
+    placeholders = sql.SQL(', ').join(sql.Placeholder() for _ in db_columns)
+
+    insert_query = sql.SQL("""
+        INSERT INTO financial_metrics (
+            ticker_id, {columns}
+        ) VALUES (%s, {placeholders})
+        ON CONFLICT (ticker_id) DO NOTHING
+    """).format(
+        columns=sql.SQL(', ').join(map(sql.Identifier, db_columns)),
+        placeholders=placeholders
+    )
+
+    def sanitize(value):
+        """Sanitize value for database insertion."""
+        return value if value is not None else None
+
+    try:
+        # Connect to the database
+        with get_db_connection() as conn:
+            ticker_id = fetch_ticker_id(symbol, conn)
+            if ticker_id is None:
+                raise ValueError(f"Ticker '{symbol}' not found.")
+            
+            logging.info(f"Inserting financial metrics data for ticker ID: {ticker_id}")
+            
+            # Map the financial_metrics data to match database columns
+            values = [
+                (ticker_id,) + tuple(
+                    sanitize(financial_metrics.get(key)) for key in financial_metrics_keys
+                )
+            ]
+            
+            if not values:
+                logging.warning("No financial metrics data to insert.")
+                return
+
+            with conn.cursor() as cursor:
+                # Log the query and values for debugging
+                logging.debug(f"Insert query: {insert_query.as_string(conn)}")
+                logging.info(f"Values: {values}")
+
+                # Execute the insert query
+                execute_batch(cursor, insert_query, values)
+            conn.commit()
+
+            logging.info(f"Successfully inserted financial metrics data for symbol: {symbol}")
+
+    except Exception as e:
+        logging.error(f"Failed to insert financial metrics data for symbol '{symbol}': {e}")
+        raise
